@@ -2,5 +2,5 @@ pyrogram==2.0.83
 tgcrypto
 motor
 pymongo
-dnspython==2.4.2
+dnspython
 python-dotenv==1.0.1
