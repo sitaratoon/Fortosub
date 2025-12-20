@@ -1,4 +1,4 @@
-import os, time
+import time
 from datetime import date, datetime
 from dotenv import load_dotenv
 from pyrogram import Client, filters
@@ -78,6 +78,20 @@ def back_menu():
         [InlineKeyboardButton("⬅️ Back Menu", callback_data="menu")]
     ])
 
+def admin_menu():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📦 Ongoing Orders", callback_data="admin_orders_active"),
+            InlineKeyboardButton("✅ Completed Orders", callback_data="admin_orders_done")
+        ],
+        [
+            InlineKeyboardButton("📊 Stats", callback_data="admin_stats")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back", callback_data="menu")
+        ]
+    ])
+
 # ================= START =================
 
 @app.on_message(filters.command("start"))
@@ -113,7 +127,7 @@ async def balance(_, cb):
 @app.on_callback_query(filters.regex("^buy$"))
 async def buy(_, cb):
     await cb.message.edit_text(
-        "💳 Buy Credits\n\n(Contact admin for credits)",
+        "💳 Buy Credits\n\nContact admin to buy credits.",
         reply_markup=back_menu()
     )
 
@@ -121,9 +135,10 @@ async def buy(_, cb):
 async def help_btn(_, cb):
     await cb.message.edit_text(
         "ℹ️ Help\n\n"
-        "• Join → VERIFY → Earn credits\n"
+        "• Join channel → VERIFY\n"
         "• 2 Credits = 1 Subscriber\n"
-        "• Bot admin compulsory in channel",
+        "• Min order = 50 credits\n"
+        "• Bot must be admin in channel",
         reply_markup=back_menu()
     )
 
@@ -175,13 +190,12 @@ async def check_join(_, cb):
     if not ch:
         return await cb.answer("Expired", show_alert=True)
 
-    # 🔐 VERIFY
     try:
         await app.get_chat_member(ch["channel_id"], cb.from_user.id)
     except UserNotParticipant:
-        return await cb.answer("❌ Join channel first", show_alert=True)
-    except Exception:
-        return await cb.answer("❌ Verification failed", show_alert=True)
+        return await cb.answer("Join channel first", show_alert=True)
+    except:
+        return await cb.answer("Verification failed", show_alert=True)
 
     await users.update_one(
         {"user_id": cb.from_user.id},
@@ -213,7 +227,7 @@ async def add(_, cb):
     )
 
     await cb.message.edit_text(
-        "Send Channel ID / @username (public)\nOR Invite link (private)\n\nBot must be ADMIN",
+        "Send channel ID / @username OR private invite link\n\nBot must be ADMIN",
         reply_markup=back_menu()
     )
 
@@ -223,49 +237,20 @@ async def steps(_, m):
     text = m.text.strip()
 
     if u.get("step") == "channel":
-
-        # PRIVATE / REQUEST LINK
-        if "t.me/+" in text:
-            try:
-                chat = await app.get_chat(text)
-            except:
-                return await m.reply("❌ Invalid invite link")
-
-            try:
-                bot_member = await app.get_chat_member(chat.id, "me")
-            except:
-                return await m.reply("❌ Bot must be ADMIN in private channel")
-
-            title = chat.title
-            link = text
-            cid = chat.id
-
-        # PUBLIC CHANNEL
-        else:
-            try:
-                chat = await app.get_chat(text)
-            except:
-                return await m.reply("❌ Invalid channel ID or username")
-
-            try:
-                bot_member = await app.get_chat_member(chat.id, "me")
-                if not bot_member.privileges:
-                    raise Exception
-            except:
-                return await m.reply(
-                    "❌ Bot is not ADMIN\nAdd bot as ADMIN & try again"
-                )
-
-            title = chat.title
-            link = f"https://t.me/{chat.username}"
-            cid = chat.id
+        try:
+            chat = await app.get_chat(text)
+            bot_member = await app.get_chat_member(chat.id, "me")
+            if not bot_member.privileges:
+                raise Exception
+        except:
+            return await m.reply("❌ Bot must be ADMIN in channel")
 
         await users.update_one(
             {"user_id": m.from_user.id},
             {"$set": {"step": "credits", "temp": {
-                "title": title,
-                "link": link,
-                "channel_id": cid
+                "title": chat.title,
+                "link": text if "t.me/+" in text else f"https://t.me/{chat.username}",
+                "channel_id": chat.id
             }}}
         )
         return await m.reply("Enter credits to use (min 50)")
@@ -309,26 +294,45 @@ async def steps(_, m):
         for admin in ADMIN_IDS:
             await app.send_message(
                 admin,
-                f"🔔 NEW ORDER\n\n"
-                f"User: {m.from_user.id}\n"
-                f"Channel: {ch['title']}\n"
-                f"Credits: {credits}\n"
-                f"Order ID: {order.inserted_id}"
+                f"🔔 New Order\nUser: {m.from_user.id}\nChannel: {ch['title']}\nCredits: {credits}"
             )
 
-        await m.reply("✅ Order placed successfully", reply_markup=back_menu())
+        await m.reply("✅ Order placed", reply_markup=back_menu())
 
 # ================= ADMIN =================
 
+@app.on_message(filters.command("admin") & filters.user(ADMIN_IDS))
+async def admin(_, m):
+    await m.reply("👑 Admin Dashboard", reply_markup=admin_menu())
+
+@app.on_callback_query(filters.regex("^admin_stats$") & filters.user(ADMIN_IDS))
+async def admin_stats(_, cb):
+    await cb.message.edit_text(
+        f"👤 Total users: {await users.count_documents({})}\n"
+        f"📦 Total orders: {await orders.count_documents({})}\n"
+        f"🔄 Active orders: {await orders.count_documents({'status':'active'})}\n"
+        f"✅ Completed orders: {await orders.count_documents({'status':'completed'})}",
+        reply_markup=admin_menu()
+    )
+
+@app.on_callback_query(filters.regex("^admin_orders_active$") & filters.user(ADMIN_IDS))
+async def admin_orders_active(_, cb):
+    text = "📦 Ongoing Orders\n\n"
+    async for o in orders.find({"status": "active"}):
+        text += f"{o['_id']} | {o['title']}\n"
+    await cb.message.edit_text(text or "No active orders", reply_markup=admin_menu())
+
+@app.on_callback_query(filters.regex("^admin_orders_done$") & filters.user(ADMIN_IDS))
+async def admin_orders_done(_, cb):
+    text = "✅ Completed Orders\n\n"
+    async for o in orders.find({"status": "completed"}):
+        text += f"{o['_id']} | {o['title']}\n"
+    await cb.message.edit_text(text or "No completed orders", reply_markup=admin_menu())
+
 @app.on_message(filters.command("addcredit") & filters.user(ADMIN_IDS))
 async def addcredit(_, m):
-    try:
-        _, uid, amount = m.text.split()
-        uid, amount = int(uid), int(amount)
-    except:
-        return await m.reply("Usage: /addcredit user_id amount")
-
-    await users.update_one({"user_id": uid}, {"$inc": {"credits": amount}})
+    _, uid, amount = m.text.split()
+    await users.update_one({"user_id": int(uid)}, {"$inc": {"credits": int(amount)}})
     await m.reply("Credits added")
 
 # ================= RUN =================
