@@ -291,10 +291,17 @@ async def steps(_, m):
              "$unset": {"step": "", "temp": ""}}
         )
 
+        # 🔔 ADMIN NOTIFICATION (EXACT FORMAT)
         for admin in ADMIN_IDS:
             await app.send_message(
                 admin,
-                f"🔔 New Order\nUser: {m.from_user.id}\nChannel: {ch['title']}\nCredits: {credits}"
+                f"🔔 NEW ORDER\n\n"
+                f"👤 User: {m.from_user.id}\n"
+                f"📢 Channel: {ch['title']}\n"
+                f"🔗 {ch['link']}\n"
+                f"👥 Subscribers: {subs}\n"
+                f"💰 Credits: {credits}\n"
+                f"🆔 Order ID: {order.inserted_id}"
             )
 
         await m.reply("✅ Order placed", reply_markup=back_menu())
@@ -304,6 +311,12 @@ async def steps(_, m):
 @app.on_message(filters.command("admin") & filters.user(ADMIN_IDS))
 async def admin(_, m):
     await m.reply("👑 Admin Dashboard", reply_markup=admin_menu())
+
+@app.on_message(filters.command("addcredit") & filters.user(ADMIN_IDS))
+async def addcredit(_, m):
+    _, uid, amount = m.text.split()
+    await users.update_one({"user_id": int(uid)}, {"$inc": {"credits": int(amount)}})
+    await m.reply("Credits added")
 
 @app.on_callback_query(filters.regex("^admin_stats$") & filters.user(ADMIN_IDS))
 async def admin_stats(_, cb):
@@ -328,12 +341,6 @@ async def admin_orders_done(_, cb):
     async for o in orders.find({"status": "completed"}):
         text += f"{o['_id']} | {o['title']}\n"
     await cb.message.edit_text(text or "No completed orders", reply_markup=admin_menu())
-
-@app.on_message(filters.command("addcredit") & filters.user(ADMIN_IDS))
-async def addcredit(_, m):
-    _, uid, amount = m.text.split()
-    await users.update_one({"user_id": int(uid)}, {"$inc": {"credits": int(amount)}})
-    await m.reply("Credits added")
 
 # ================= RUN =================
 
