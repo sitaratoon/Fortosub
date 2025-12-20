@@ -1,9 +1,12 @@
 import os
+from dotenv import load_dotenv
 from datetime import date, datetime
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant
 from motor.motor_asyncio import AsyncIOMotorClient
+
+load_dotenv()  # ⭐ VERY IMPORTANT
 
 # ================= CONFIG =================
 API_ID = int(os.getenv("18946488"))
