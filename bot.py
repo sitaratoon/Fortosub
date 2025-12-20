@@ -19,7 +19,7 @@ ADMIN_IDS = [6692613520]
 JOIN_REWARD = 2
 DAILY_JOIN_LIMIT = 20
 MIN_ORDER_CREDITS = 50
-VERIFY_DELAY = 5
+VERIFY_DELAY = 3
 # =========================================
 
 app = Client("SubXChangeBot", API_ID, API_HASH, bot_token=BOT_TOKEN)
