@@ -64,6 +64,7 @@ def main_menu():
             InlineKeyboardButton("🧾 Order History", callback_data="history")
         ],
         [
+            InlineKeyboardButton("💳 Buy Credits", callback_data="buy"),
             InlineKeyboardButton("ℹ️ Help", callback_data="help")
         ]
     ])
@@ -86,10 +87,7 @@ def admin_menu():
 async def start(_, m):
     await users.update_one(
         {"user_id": m.from_user.id},
-        {"$unset": {
-            "step": "", "awaiting": "", "awaiting_time": "",
-            "temp_channel": ""
-        }}
+        {"$unset": {"step": "", "awaiting": "", "awaiting_time": "", "temp_channel": ""}}
     )
     u = await get_user(m.from_user.id)
     await m.reply(
@@ -126,6 +124,21 @@ async def help_btn(_, cb):
         "• Minimum order = 50 credits\n"
         "• 2 Credits = 1 Subscriber\n"
         "• Credits cut instantly on order",
+        reply_markup=back_menu()
+    )
+
+# ================= BUY CREDITS (INFO ONLY) =================
+
+@app.on_callback_query(filters.regex("^buy$"))
+async def buy(_, cb):
+    await cb.message.edit_text(
+        "💳 Buy Credits\n\n"
+        "Minimum Order: 50 Credits\n\n"
+        "Example Pricing:\n"
+        "50 Credits  = ₹50\n"
+        "100 Credits = ₹90\n"
+        "250 Credits = ₹200\n\n"
+        "📌 Payment system will be enabled later.",
         reply_markup=back_menu()
     )
 
@@ -182,9 +195,14 @@ async def check_join(_, cb):
          "$push": {"joined": oid}}
     )
 
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➡️ Join Next Channel", callback_data="earn")],
+        [InlineKeyboardButton("⬅️ Back Menu", callback_data="menu")]
+    ])
+
     await cb.message.edit_text(
-        "✅ Verified!\n💰 +2 Credits added",
-        reply_markup=back_menu()
+        "✅ Verified!\n💰 +2 Credits added\n\nJoin another channel 👇",
+        reply_markup=kb
     )
 
 # ================= ADD CHANNEL =================
@@ -201,11 +219,7 @@ async def add(_, cb):
 
     await users.update_one(
         {"user_id": cb.from_user.id},
-        {"$set": {
-            "step": "channel",
-            "awaiting": True,
-            "awaiting_time": int(time.time())
-        }}
+        {"$set": {"step": "channel", "awaiting": True, "awaiting_time": int(time.time())}}
     )
 
     await cb.message.edit_text(
@@ -270,8 +284,7 @@ async def steps(_, m):
         subs = credits_used // 2
         ch = u["temp_channel"]
 
-        # save channel
-        result = await channels.insert_one({
+        res = await channels.insert_one({
             "owner_id": m.from_user.id,
             "title": ch["title"],
             "link": ch["link"],
@@ -279,10 +292,9 @@ async def steps(_, m):
             "status": "active"
         })
 
-        # save order
         await orders.insert_one({
             "user_id": m.from_user.id,
-            "channel_id": str(result.inserted_id),
+            "channel_id": str(res.inserted_id),
             "title": ch["title"],
             "credits_used": credits_used,
             "subscribers": subs,
@@ -290,14 +302,12 @@ async def steps(_, m):
             "date": str(datetime.now())
         })
 
-        # deduct credits
         await users.update_one(
             {"user_id": m.from_user.id},
             {"$inc": {"credits": -credits_used},
              "$unset": {"step": "", "temp_channel": ""}}
         )
 
-        # admin notification
         for admin in ADMIN_IDS:
             await app.send_message(
                 admin,
@@ -339,7 +349,7 @@ async def admin_orders(_, cb):
         text += (
             f"👤 {o['user_id']}\n"
             f"📢 {o['title']}\n"
-            f"💰 {o['credits_used']} credits\n\n"
+            f"💰 {o.get('credits_used',0)} credits\n\n"
         )
     if not found:
         text = "No active orders"
@@ -355,7 +365,7 @@ async def user_orders(_, m):
         found = True
         text += (
             f"📢 {o['title']}\n"
-            f"💰 {o['credits_used']} credits | 👥 {o['subscribers']}\n"
+            f"💰 {o.get('credits_used',0)} credits | 👥 {o.get('subscribers',0)}\n"
             f"📌 {o['status']}\n\n"
         )
     if not found:
