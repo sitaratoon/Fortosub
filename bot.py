@@ -6,10 +6,10 @@ from pyrogram.errors import UserNotParticipant
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # ================= CONFIG =================
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-MONGO_DB = os.getenv("MONGO_DB")
+API_ID = int(os.getenv("18946488"))
+API_HASH = os.getenv("c163d4e28e63196c3806cf3b9b2885de")
+BOT_TOKEN = os.getenv("8410298290:AAGPdfUv3nwkzkdKZFoFoAweB_T8JVf2o_o")
+MONGO_DB = os.getenv("mongodb+srv://acxanime01:acxanime01@cluster0.alxqtrc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 
 ADMIN_IDS = [123456789]   # <-- ADMIN TELEGRAM IDs
 JOIN_REWARD = 2           # 2 credits = 1 subscriber
