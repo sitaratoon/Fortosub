@@ -197,6 +197,7 @@ async def check_join(_, cb):
     except:
         return await cb.answer("Verification failed", show_alert=True)
 
+    # CREDIT ADD
     await users.update_one(
         {"user_id": cb.from_user.id},
         {
@@ -204,6 +205,32 @@ async def check_join(_, cb):
             "$push": {"joined": oid}
         }
     )
+
+    # ===== ORDER PROGRESS =====
+    order = await orders.find_one({"channel_id": oid, "status": "active"})
+    if order:
+        done = order.get("completed", 0) + 1
+
+        if done >= order["subscribers"]:
+            await orders.update_one(
+                {"_id": order["_id"]},
+                {"$set": {"status": "completed", "completed": done}}
+            )
+
+            # 🔔 USER ORDER COMPLETED NOTIFICATION
+            await app.send_message(
+                order["user_id"],
+                f"🎉 ORDER COMPLETED!\n\n"
+                f"📢 Channel: {order['title']}\n"
+                f"👥 Subscribers Added: {order['subscribers']}\n"
+                f"💰 Credits Used: {order['credits_used']}\n"
+                f"🆔 Order ID: {order['_id']}"
+            )
+        else:
+            await orders.update_one(
+                {"_id": order["_id"]},
+                {"$set": {"completed": done}}
+            )
 
     await cb.message.edit_text(
         "✅ Verified! +2 Credits",
@@ -291,7 +318,7 @@ async def steps(_, m):
              "$unset": {"step": "", "temp": ""}}
         )
 
-        # 🔔 ADMIN NOTIFICATION (EXACT FORMAT)
+        # 🔔 ADMIN NEW ORDER NOTIFICATION (EXACT FORMAT)
         for admin in ADMIN_IDS:
             await app.send_message(
                 admin,
@@ -317,6 +344,24 @@ async def addcredit(_, m):
     _, uid, amount = m.text.split()
     await users.update_one({"user_id": int(uid)}, {"$inc": {"credits": int(amount)}})
     await m.reply("Credits added")
+
+@app.on_message(filters.command("cancelorder") & filters.user(ADMIN_IDS))
+async def cancelorder(_, m):
+    _, oid = m.text.split()
+    oid = ObjectId(oid)
+
+    order = await orders.find_one({"_id": oid})
+    if not order:
+        return await m.reply("Order not found")
+
+    await orders.update_one({"_id": oid}, {"$set": {"status": "cancelled"}})
+    await m.reply("Order cancelled")
+
+@app.on_message(filters.command("resetcredit") & filters.user(ADMIN_IDS))
+async def resetcredit(_, m):
+    _, uid = m.text.split()
+    await users.update_one({"user_id": int(uid)}, {"$set": {"credits": 0}})
+    await m.reply("Credits reset")
 
 @app.on_callback_query(filters.regex("^admin_stats$") & filters.user(ADMIN_IDS))
 async def admin_stats(_, cb):
