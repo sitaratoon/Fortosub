@@ -9,10 +9,10 @@ from motor.motor_asyncio import AsyncIOMotorClient
 load_dotenv()  # ⭐ VERY IMPORTANT
 
 # ================= CONFIG =================
-API_ID = int(os.getenv("18946488"))
-API_HASH = os.getenv("c163d4e28e63196c3806cf3b9b2885de")
-BOT_TOKEN = os.getenv("8410298290:AAGPdfUv3nwkzkdKZFoFoAweB_T8JVf2o_o")
-MONGO_DB = os.getenv("mongodb+srv://acxanime01:acxanime01@cluster0.alxqtrc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+API_ID = 18946488
+API_HASH = "c163d4e28e63196c3806cf3b9b2885de"
+BOT_TOKEN = "8410298290:AAGPdfUv3nwkzkdKZFoFoAweB_T8JVf2o_o"
+MONGO_DB = "mongodb+srv://acxanime01:acxanime01@cluster0.alxqtrc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 ADMIN_IDS = [6692613520]   # <-- ADMIN TELEGRAM IDs
 JOIN_REWARD = 2           # 2 credits = 1 subscriber
