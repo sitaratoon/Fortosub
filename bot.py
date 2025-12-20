@@ -236,7 +236,7 @@ async def add(_, cb):
         reply_markup=back_menu()
     )
 
-@app.on_message(filters.private & filters.text & ~filters.command)
+@app.on_message(filters.private & filters.text & ~filters.regex("^/"))
 async def steps(_, m):
     u = await get_user(m.from_user.id)
     text = m.text.strip()
