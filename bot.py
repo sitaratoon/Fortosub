@@ -197,7 +197,7 @@ async def earn(_, cb):
         return await cb.answer("Daily limit reached", show_alert=True)
 
     # 🔁 STEP 1: CHECK OLD JOINED CHANNELS (leave detect)
-        for jid in u.get("joined", []):
+    for jid in u.get("joined", []):
         ch_old = await channels.find_one({
             "_id": ObjectId(jid),
             "status": "active"
