@@ -21,7 +21,7 @@ MONGO_DB = "mongodb+srv://acxanime01:acxanime01@cluster0.alxqtrc.mongodb.net/?re
 ADMIN_IDS = [6692613520]
 
 JOIN_REWARD = 2
-DAILY_JOIN_LIMIT = 20
+DAILY_JOIN_LIMIT = 100
 MIN_ORDER_CREDITS = 50
 VERIFY_DELAY = 1
 # =========================================
