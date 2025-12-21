@@ -13,11 +13,13 @@ load_dotenv()
 API_ID = 18946488
 API_HASH = "c163d4e28e63196c3806cf3b9b2885de"
 BOT_TOKEN = "8410298290:AAGPdfUv3nwkzkdKZFoFoAweB_T8JVf2o_o"
-MONGO_DB = "mongodb+srv://acxanime01:acxanime01@cluster0.alxqtrc.mongodb.net/?retryWrites=tru>
+MONGO_DB = "mongodb+srv://acxanime01:acxanime01@cluster0.alxqtrc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+
 ADMIN_IDS = [6692613520]
+
 JOIN_REWARD = 2
 DAILY_JOIN_LIMIT = 20
-MIN_ORDER_CREDITS = 6
+MIN_ORDER_CREDITS = 50
 VERIFY_DELAY = 1
 # =========================================
 
@@ -113,7 +115,7 @@ async def menu(_, cb):
         reply_markup=main_menu()
     )
 
-# ================= USER BUTTONS =================
+# ================= USER =================
 
 @app.on_callback_query(filters.regex("^balance$"))
 async def balance(_, cb):
@@ -165,7 +167,10 @@ async def earn(_, cb):
 
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔔 Join Channel", url=ch["link"])],
-        [InlineKeyboardButton("✅ Verify Join", callback_data=f"check_{ch['_id']}")],
+        [
+            InlineKeyboardButton("✅ Verify Join", callback_data=f"check_{ch['_id']}"),
+            InlineKeyboardButton("➡️ Next Channel", callback_data="earn")
+        ],
         [InlineKeyboardButton("⬅️ Back", callback_data="menu")]
     ])
 
@@ -193,10 +198,7 @@ async def check_join(_, cb):
         await app.get_chat_member(ch["channel_id"], cb.from_user.id)
     except UserNotParticipant:
         return await cb.answer("Join channel first", show_alert=True)
-    except:
-        return await cb.answer("Verification failed", show_alert=True)
 
-    # CREDIT ADD
     await users.update_one(
         {"user_id": cb.from_user.id},
         {
@@ -205,25 +207,21 @@ async def check_join(_, cb):
         }
     )
 
-    # ===== ORDER PROGRESS =====
     order = await orders.find_one({"channel_id": oid, "status": "active"})
     if order:
         done = order.get("completed", 0) + 1
-
         if done >= order["subscribers"]:
             await orders.update_one(
                 {"_id": order["_id"]},
                 {"$set": {"status": "completed", "completed": done}}
             )
-
-            # 🔔 USER ORDER COMPLETED NOTIFICATION
+            await channels.update_one(
+                {"_id": ObjectId(order["channel_id"])},
+                {"$set": {"status": "inactive"}}
+            )
             await app.send_message(
                 order["user_id"],
-                f"🎉 ORDER COMPLETED!\n\n"
-                f"📢 Channel: {order['title']}\n"
-                f"👥 Subscribers Added: {order['subscribers']}\n"
-                f"💰 Credits Used: {order['credits_used']}\n"
-                f"🆔 Order ID: {order['_id']}"
+                f"🎉 ORDER COMPLETED!\n\n📢 {order['title']}\n👥 {order['subscribers']}"
             )
         else:
             await orders.update_one(
@@ -239,152 +237,74 @@ async def check_join(_, cb):
         ])
     )
 
-# ================= ADD CHANNEL =================
-
-@app.on_callback_query(filters.regex("^add$"))
-async def add(_, cb):
-    u = await get_user(cb.from_user.id)
-    if u["credits"] < MIN_ORDER_CREDITS:
-        return await cb.answer("Minimum 50 credits required", show_alert=True)
-
-    await users.update_one(
-        {"user_id": cb.from_user.id},
-        {"$set": {"step": "channel"}}
-    )
-
-    await cb.message.edit_text(
-        "Send channel ID / @username OR private invite link\n\nBot must be ADMIN",
-        reply_markup=back_menu()
-    )
-
-@app.on_message(filters.private & filters.text & ~filters.regex("^/"))
-async def steps(_, m):
-    u = await get_user(m.from_user.id)
-    text = m.text.strip()
-
-    if u.get("step") == "channel":
-        try:
-            chat = await app.get_chat(text)
-            bot_member = await app.get_chat_member(chat.id, "me")
-            if not bot_member.privileges:
-                raise Exception
-        except:
-            return await m.reply("❌ Bot must be ADMIN in channel")
-
-        await users.update_one(
-            {"user_id": m.from_user.id},
-            {"$set": {"step": "credits", "temp": {
-                "title": chat.title,
-                "link": text if "t.me/+" in text else f"https://t.me/{chat.username}",
-                "channel_id": chat.id
-            }}}
-        )
-        return await m.reply("Enter credits to use (min 50)")
-
-    if u.get("step") == "credits":
-        if not text.isdigit():
-            return await m.reply("Numbers only")
-
-        credits = int(text)
-        if credits < MIN_ORDER_CREDITS or credits > u["credits"]:
-            return await m.reply("Invalid credits")
-
-        subs = credits // 2
-        ch = u["temp"]
-
-        res = await channels.insert_one({
-            "owner_id": m.from_user.id,
-            "title": ch["title"],
-            "link": ch["link"],
-            "channel_id": ch["channel_id"],
-            "status": "active"
-        })
-
-        order = await orders.insert_one({
-            "user_id": m.from_user.id,
-            "channel_id": str(res.inserted_id),
-            "title": ch["title"],
-            "credits_used": credits,
-            "subscribers": subs,
-            "completed": 0,
-            "status": "active",
-            "date": str(datetime.now())
-        })
-
-        await users.update_one(
-            {"user_id": m.from_user.id},
-            {"$inc": {"credits": -credits},
-             "$unset": {"step": "", "temp": ""}}
-        )
-
-        # 🔔 ADMIN NEW ORDER NOTIFICATION (EXACT FORMAT)
-        for admin in ADMIN_IDS:
-            await app.send_message(
-                admin,
-                f"🔔 NEW ORDER\n\n"
-                f"👤 User: {m.from_user.id}\n"
-                f"📢 Channel: {ch['title']}\n"
-                f"🔗 {ch['link']}\n"
-                f"👥 Subscribers: {subs}\n"
-                f"💰 Credits: {credits}\n"
-                f"🆔 Order ID: {order.inserted_id}"
-            )
-
-        await m.reply("✅ Order placed", reply_markup=back_menu())
-
 # ================= ADMIN =================
 
 @app.on_message(filters.command("admin") & filters.user(ADMIN_IDS))
 async def admin(_, m):
-    await m.reply("👑 Admin Dashboard", reply_markup=admin_menu())
-
-@app.on_message(filters.command("addcredit") & filters.user(ADMIN_IDS))
-async def addcredit(_, m):
-    _, uid, amount = m.text.split()
-    await users.update_one({"user_id": int(uid)}, {"$inc": {"credits": int(amount)}})
-    await m.reply("Credits added")
+    await m.reply("👑 Admin Panel", reply_markup=admin_menu())
 
 @app.on_message(filters.command("cancelorder") & filters.user(ADMIN_IDS))
 async def cancelorder(_, m):
-    _, oid = m.text.split()
-    oid = ObjectId(oid)
+    try:
+        _, oid = m.text.split()
+        oid = ObjectId(oid)
+    except:
+        return await m.reply("Usage: /cancelorder <order_id>")
 
     order = await orders.find_one({"_id": oid})
-    if not order:
-        return await m.reply("Order not found")
+    if not order or order["status"] != "active":
+        return await m.reply("Order not active")
 
     await orders.update_one({"_id": oid}, {"$set": {"status": "cancelled"}})
-    await m.reply("Order cancelled")
-
-@app.on_message(filters.command("resetcredit") & filters.user(ADMIN_IDS))
-async def resetcredit(_, m):
-    _, uid = m.text.split()
-    await users.update_one({"user_id": int(uid)}, {"$set": {"credits": 0}})
-    await m.reply("Credits reset")
-
-@app.on_callback_query(filters.regex("^admin_stats$") & filters.user(ADMIN_IDS))
-async def admin_stats(_, cb):
-    await cb.message.edit_text(
-        f"👤 Total users: {await users.count_documents({})}\n"
-        f"📦 Total orders: {await orders.count_documents({})}\n"
-        f"🔄 Active orders: {await orders.count_documents({'status':'active'})}\n"
-        f"✅ Completed orders: {await orders.count_documents({'status':'completed'})}",
-        reply_markup=admin_menu()
+    await channels.update_one(
+        {"_id": ObjectId(order["channel_id"])},
+        {"$set": {"status": "inactive"}}
     )
+    await users.update_one(
+        {"user_id": order["user_id"]},
+        {"$inc": {"credits": order["credits_used"]}}
+    )
+
+    await app.send_message(
+        order["user_id"],
+        f"❌ Order Cancelled\n💰 Credits Refunded: {order['credits_used']}"
+    )
+    await m.reply("✅ Order cancelled & refunded")
 
 @app.on_callback_query(filters.regex("^admin_orders_active$") & filters.user(ADMIN_IDS))
 async def admin_orders_active(_, cb):
-    text = "📦 Ongoing Orders\n\n"
+    text = "📦 **ONGOING ORDERS**\n\n"
+    found = False
     async for o in orders.find({"status": "active"}):
-        text += f"{o['_id']} | {o['title']}\n"
-    await cb.message.edit_text(text or "No active orders", reply_markup=admin_menu())
+        found = True
+        text += (
+            f"🆔 `{o['_id']}`\n"
+            f"📢 {o['title']}\n"
+            f"👥 {o['completed']}/{o['subscribers']}\n"
+            f"❌ /cancelorder {o['_id']}\n\n"
+        )
+    await cb.message.edit_text(
+        text if found else "No active orders",
+        reply_markup=admin_menu(),
+        parse_mode="markdown"
+    )
 
 @app.on_callback_query(filters.regex("^admin_orders_done$") & filters.user(ADMIN_IDS))
 async def admin_orders_done(_, cb):
-    text = "✅ Completed Orders\n\n"
+    text = "✅ **COMPLETED ORDERS**\n\n"
+    found = False
     async for o in orders.find({"status": "completed"}):
-        text += f"{o['_id']} | {o['title']}\n"
-    await cb.message.edit_text(text or "No completed orders", reply_markup=admin_menu())
+        found = True
+        text += (
+            f"🆔 `{o['_id']}`\n"
+            f"📢 {o['title']}\n"
+            f"👥 {o['subscribers']}\n\n"
+        )
+    await cb.message.edit_text(
+        text if found else "No completed orders",
+        reply_markup=admin_menu(),
+        parse_mode="markdown"
+    )
 
 # ================= RUN =================
 
