@@ -275,35 +275,41 @@ async def cancelorder(_, m):
 async def admin_orders_active(_, cb):
     text = "📦 **ONGOING ORDERS**\n\n"
     found = False
+
     async for o in orders.find({"status": "active"}):
         found = True
         text += (
             f"🆔 `{o['_id']}`\n"
             f"📢 {o['title']}\n"
-            f"👥 {o['completed']}/{o['subscribers']}\n"
-            f"❌ /cancelorder {o['_id']}\n\n"
+            f"👥 {o.get('completed',0)}/{o['subscribers']}\n"
+            f"❌ /cancelorder {o['_id']}\n"
+            f"──────────────\n"
         )
+
     await cb.message.edit_text(
-        text if found else "No active orders",
+        text if found else "📭 No active orders",
         reply_markup=admin_menu(),
-        parse_mode="markdown"
+        parse_mode=ParseMode.MARKDOWN
     )
 
 @app.on_callback_query(filters.regex("^admin_orders_done$") & filters.user(ADMIN_IDS))
 async def admin_orders_done(_, cb):
     text = "✅ **COMPLETED ORDERS**\n\n"
     found = False
+
     async for o in orders.find({"status": "completed"}):
         found = True
         text += (
             f"🆔 `{o['_id']}`\n"
             f"📢 {o['title']}\n"
-            f"👥 {o['subscribers']}\n\n"
+            f"👥 {o['subscribers']}\n"
+            f"──────────────\n"
         )
+
     await cb.message.edit_text(
-        text if found else "No completed orders",
+        text if found else "📭 No completed orders",
         reply_markup=admin_menu(),
-        parse_mode="markdown"
+        parse_mode=ParseMode.MARKDOWN
     )
 
 # ================= RUN =================
