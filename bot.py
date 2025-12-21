@@ -302,7 +302,7 @@ async def check_join(_, cb):
         ])
     )
 
-# ================= ADD CHANNEL (PUBLIC + PRIVATE) =================
+# ================= ADD CHANNEL =================
 
 @app.on_callback_query(filters.regex("^add$"))
 async def add(_, cb):
@@ -312,7 +312,7 @@ async def add(_, cb):
 
     await users.update_one({"user_id": cb.from_user.id}, {"$set": {"step": "channel"}})
     await cb.message.edit_text(
-        "Send channel @username / ID / private invite link\n\nBot must be ADMIN",
+        "Send channel @username OR private channel ID\nBot must be ADMIN",
         reply_markup=back_menu()
     )
 
@@ -325,22 +325,22 @@ async def steps(_, m):
         try:
             if text.startswith("@"):
                 chat = await app.get_chat(text)
+                link = f"https://t.me/{text.lstrip('@')}"
+
             elif "t.me/" in text:
                 chat = await app.get_chat(text)
+                link = text
+
             else:
                 chat = await app.get_chat(int(text))
+                link = await app.export_chat_invite_link(chat.id)
 
             bot_member = await app.get_chat_member(chat.id, "me")
             if not bot_member.privileges:
                 raise Exception
+
         except:
-            return await m.reply(
-                "❌ Channel add failed\n\n"
-                "Make sure:\n"
-                "• Bot is ADMIN\n"
-                "• Invite link is valid\n"
-                "• Bot is already added"
-            )
+            return await m.reply("❌ Channel add failed\nBot must be ADMIN")
 
         await users.update_one(
             {"user_id": m.from_user.id},
@@ -348,7 +348,7 @@ async def steps(_, m):
                 "step": "credits",
                 "temp": {
                     "title": chat.title,
-                    "link": text,
+                    "link": link,
                     "channel_id": chat.id
                 }
             }}
@@ -391,7 +391,6 @@ async def steps(_, m):
         )
 
         await m.reply("✅ Order placed", reply_markup=back_menu())
-
 # ================= ADMIN =================
 
 @app.on_message(filters.command("admin") & filters.user(ADMIN_IDS))
