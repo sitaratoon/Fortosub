@@ -10,6 +10,10 @@ from bson import ObjectId
 load_dotenv()
 
 # ================= CONFIG =================
+API_ID = 18946488
+API_HASH = "c163d4e28e63196c3806cf3b9b2885de"
+BOT_TOKEN = "8410298290:AAGPdfUv3nwkzkdKZFoFoAweB_T8JVf2o_o"
+MONGO_DB = "mongodb+srv://acxanime01:acxanime01@cluster0.alxqtrc.mongodb.net/?retryWrites=tru>
 ADMIN_IDS = [6692613520]
 JOIN_REWARD = 2
 DAILY_JOIN_LIMIT = 20
