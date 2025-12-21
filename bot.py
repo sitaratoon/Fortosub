@@ -196,6 +196,38 @@ async def earn(_, cb):
     if u["daily"] >= DAILY_JOIN_LIMIT:
         return await cb.answer("Daily limit reached", show_alert=True)
 
+    # 🔁 STEP 1: CHECK OLD JOINED CHANNELS (leave detect)
+    for jid in u.get("joined", []):
+        ch_old = await channels.find_one({
+            "_id": ObjectId(jid),
+            "status": "active"
+        })
+        if not ch_old:
+            continue
+
+        try:
+            await app.get_chat_member(ch_old["channel_id"], cb.from_user.id)
+        except UserNotParticipant:
+            # ❌ User left → force rejoin same channel
+            await users.update_one(
+                {"user_id": cb.from_user.id},
+                {"$set": {"last_join_time": int(time.time())}}
+            )
+
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔔 Re-Join Channel", url=ch_old["link"])],
+                [InlineKeyboardButton("✅ Verify Again", callback_data=f"check_{jid}")],
+                [InlineKeyboardButton("⬅️ Back", callback_data="menu")]
+            ])
+
+            return await cb.message.edit_text(
+                f"⚠️ Aapne channel leave kar diya hai\n\n"
+                f"📢 {ch_old['title']}\n\n"
+                f"Pehle is channel ko dubara join karo 👇",
+                reply_markup=kb
+            )
+
+    # 🔁 STEP 2: GIVE NEW CHANNEL (same as before)
     ch = await channels.find_one({
         "status": "active",
         "_id": {"$nin": [ObjectId(x) for x in u.get("joined", [])]}
@@ -246,32 +278,48 @@ async def earn(_, cb):
         f"Join channel & wait {VERIFY_DELAY}s then verify\n\n📢 {ch['title']}",
         reply_markup=kb
     )
-
+    
 @app.on_callback_query(filters.regex("^check_"))
 async def check_join(_, cb):
     oid = cb.data.split("_")[1]
     u = await get_user(cb.from_user.id)
 
-    if oid in u["joined"]:
-        return await cb.answer("Already verified", show_alert=True)
+    # ❌ Already credited
+    if oid in u.get("joined", []):
+        return await cb.answer("Is channel ka credit pehle hi mil chuka hai ✅", show_alert=True)
 
+    # ⏳ Delay check
     if int(time.time()) - u["last_join_time"] < VERIFY_DELAY:
-        return await cb.answer("Please wait before verify", show_alert=True)
+        return await cb.answer("Thoda wait karo fir verify karo", show_alert=True)
 
     ch = await channels.find_one({"_id": ObjectId(oid)})
     if not ch:
-        return await cb.answer("Channel expired", show_alert=True)
+        return await cb.answer("Channel expire ho chuka hai", show_alert=True)
 
+    # 🔍 LIVE JOIN CHECK
     try:
         await app.get_chat_member(ch["channel_id"], cb.from_user.id)
     except UserNotParticipant:
-        return await cb.answer("Join channel first", show_alert=True)
+        # ❌ Join nahi kiya → same channel wapas
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔔 Join Channel", url=ch["link"])],
+            [InlineKeyboardButton("✅ Verify Join", callback_data=f"check_{oid}")]
+        ])
+        return await cb.message.edit_text(
+            "❌ Aap channel join nahi ho\n\nPehle join karo fir verify karo 👇",
+            reply_markup=kb
+        )
 
+    # ✅ CREDIT ONCE ONLY
     await users.update_one(
         {"user_id": cb.from_user.id},
-        {"$inc": {"credits": JOIN_REWARD, "daily": 1}, "$push": {"joined": oid}}
+        {
+            "$inc": {"credits": JOIN_REWARD, "daily": 1},
+            "$push": {"joined": oid}
+        }
     )
 
+    # 📦 Order update
     order = await orders.find_one({"channel_id": oid, "status": "active"})
     if order:
         done = order.get("completed", 0) + 1
@@ -295,10 +343,10 @@ async def check_join(_, cb):
             )
 
     await cb.message.edit_text(
-        "✅ Verified! +2 Credits",
+        "✅ Join verified!\n💰 +2 Credits",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("➡️ Join Next Channel", callback_data="earn")],
-            [InlineKeyboardButton("⬅️ Back Menu", callback_data="menu")]
+            [InlineKeyboardButton("➡️ Next Channel", callback_data="earn")],
+            [InlineKeyboardButton("⬅️ Menu", callback_data="menu")]
         ])
     )
 
