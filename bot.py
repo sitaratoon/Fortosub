@@ -418,6 +418,42 @@ async def cancelorder(_, m):
 
     await m.reply(f"✅ Order cancelled\n💳 Refunded: {refund}")
 
+@app.on_message(filters.command("addcredit") & filters.user(ADMIN_IDS))
+async def addcredit(_, m):
+    try:
+        _, uid, amount = m.text.split()
+        uid = int(uid)
+        amount = int(amount)
+    except:
+        return await m.reply(
+            "❌ Usage:\n/addcredit <user_id> <credits>\n\nExample:\n/addcredit 123456789 50"
+        )
+
+    if amount <= 0:
+        return await m.reply("❌ Credit amount must be greater than 0")
+
+    user = await users.find_one({"user_id": uid})
+    if not user:
+        return await m.reply("❌ User not found")
+
+    await users.update_one(
+        {"user_id": uid},
+        {"$inc": {"credits": amount}}
+    )
+
+    # Notify user
+    try:
+        await app.send_message(
+            uid,
+            f"💳 Credits Added\n\n"
+            f"➕ {amount} credits added to your account\n"
+            f"👑 Added by admin"
+        )
+    except:
+        pass
+
+    await m.reply(f"✅ Successfully added {amount} credits to user {uid}")
+
 @app.on_callback_query(filters.regex("^admin_orders_active$") & filters.user(ADMIN_IDS))
 async def admin_orders_active(_, cb):
     text = "📦 **ONGOING ORDERS**\n\n"
