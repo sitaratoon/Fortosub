@@ -198,34 +198,43 @@ async def earn(_, cb):
 
     # 🔁 STEP 1: CHECK OLD JOINED CHANNELS (leave detect)
     for jid in u.get("joined", []):
-        ch_old = await channels.find_one({
-            "_id": ObjectId(jid),
-            "status": "active"
-        })
-        if not ch_old:
-            continue
+    ch_old = await channels.find_one({
+        "_id": ObjectId(jid),
+        "status": "active"
+    })
+    if not ch_old:
+        continue
 
-        try:
-            await app.get_chat_member(ch_old["channel_id"], cb.from_user.id)
-        except UserNotParticipant:
-            # ❌ User left → force rejoin same channel
-            await users.update_one(
-                {"user_id": cb.from_user.id},
-                {"$set": {"last_join_time": int(time.time())}}
-            )
+    try:
+        await app.get_chat_member(ch_old["channel_id"], cb.from_user.id)
 
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔔 Re-Join Channel", url=ch_old["link"])],
-                [InlineKeyboardButton("✅ Verify Again", callback_data=f"check_{jid}")],
-                [InlineKeyboardButton("⬅️ Back", callback_data="menu")]
-            ])
+    except UserNotParticipant:
+        # 🔁 User left → force rejoin
+        await users.update_one(
+            {"user_id": cb.from_user.id},
+            {"$set": {"last_join_time": int(time.time())}}
+        )
 
-            return await cb.message.edit_text(
-                f"⚠️ Aapne channel leave kar diya hai\n\n"
-                f"📢 {ch_old['title']}\n\n"
-                f"Pehle is channel ko dubara join karo 👇",
-                reply_markup=kb
-            )
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔔 Re-Join Channel", url=ch_old["link"])],
+            [InlineKeyboardButton("✅ Verify Again", callback_data=f"check_{jid}")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="menu")]
+        ])
+
+        return await cb.message.edit_text(
+            f"⚠️ Aapne channel leave kar diya hai\n\n"
+            f"📢 {ch_old['title']}\n\n"
+            f"Pehle is channel ko dubara join karo 👇",
+            reply_markup=kb
+        )
+
+    except (ValueError, KeyError):
+        # ❌ Invalid / private / deleted channel
+        await channels.update_one(
+            {"_id": ObjectId(jid)},
+            {"$set": {"status": "inactive"}}
+        )
+        continue
 
     # 🔁 STEP 2: GIVE NEW CHANNEL (same as before)
     ch = await channels.find_one({
