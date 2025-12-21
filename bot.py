@@ -109,7 +109,6 @@ async def start(_, m):
 
     u = await get_user(m.from_user.id)
 
-    # REFERRAL CREDIT
     if ref_id and ref_id != m.from_user.id and not u.get("ref_credited"):
         ref_user = await users.find_one({"user_id": ref_id})
         if ref_user:
@@ -124,7 +123,7 @@ async def start(_, m):
             try:
                 await app.send_message(
                     ref_id,
-                    f"🎉 Referral Success!\n💰 You earned +2 credits"
+                    "🎉 Referral Success!\n💰 You earned +2 credits"
                 )
             except:
                 pass
@@ -205,7 +204,6 @@ async def earn(_, cb):
     if not ch:
         return await cb.answer("No channels available", show_alert=True)
 
-    # CHECK BOT ADMIN
     try:
         bot_member = await app.get_chat_member(ch["channel_id"], "me")
         if not bot_member.privileges:
@@ -269,7 +267,6 @@ async def check_join(_, cb):
     except UserNotParticipant:
         return await cb.answer("Join channel first", show_alert=True)
 
-    # CREDIT USER
     await users.update_one(
         {"user_id": cb.from_user.id},
         {"$inc": {"credits": JOIN_REWARD, "daily": 1}, "$push": {"joined": oid}}
@@ -305,7 +302,7 @@ async def check_join(_, cb):
         ])
     )
 
-# ================= ADD CHANNEL =================
+# ================= ADD CHANNEL (PUBLIC + PRIVATE) =================
 
 @app.on_callback_query(filters.regex("^add$"))
 async def add(_, cb):
@@ -315,7 +312,7 @@ async def add(_, cb):
 
     await users.update_one({"user_id": cb.from_user.id}, {"$set": {"step": "channel"}})
     await cb.message.edit_text(
-        "Send channel @username / ID / invite link\nBot must be admin",
+        "Send channel @username / ID / private invite link\n\nBot must be ADMIN",
         reply_markup=back_menu()
     )
 
@@ -326,12 +323,24 @@ async def steps(_, m):
 
     if u.get("step") == "channel":
         try:
-            chat = await app.get_chat(text)
+            if text.startswith("@"):
+                chat = await app.get_chat(text)
+            elif "t.me/" in text:
+                chat = await app.get_chat(text)
+            else:
+                chat = await app.get_chat(int(text))
+
             bot_member = await app.get_chat_member(chat.id, "me")
             if not bot_member.privileges:
                 raise Exception
         except:
-            return await m.reply("❌ Bot must be admin in channel")
+            return await m.reply(
+                "❌ Channel add failed\n\n"
+                "Make sure:\n"
+                "• Bot is ADMIN\n"
+                "• Invite link is valid\n"
+                "• Bot is already added"
+            )
 
         await users.update_one(
             {"user_id": m.from_user.id},
@@ -339,7 +348,7 @@ async def steps(_, m):
                 "step": "credits",
                 "temp": {
                     "title": chat.title,
-                    "link": text if "t.me/" in text else f"https://t.me/{chat.username}",
+                    "link": text,
                     "channel_id": chat.id
                 }
             }}
@@ -389,6 +398,36 @@ async def steps(_, m):
 async def admin(_, m):
     await m.reply("👑 Admin Panel", reply_markup=admin_menu())
 
+@app.on_message(filters.command("addcredit") & filters.user(ADMIN_IDS))
+async def addcredit(_, m):
+    try:
+        _, uid, amount = m.text.split()
+        uid = int(uid)
+        amount = int(amount)
+    except:
+        return await m.reply("Usage:\n/addcredit <user_id> <credits>")
+
+    if amount <= 0:
+        return await m.reply("Credits must be > 0")
+
+    if not await users.find_one({"user_id": uid}):
+        return await m.reply("User not found")
+
+    await users.update_one(
+        {"user_id": uid},
+        {"$inc": {"credits": amount}}
+    )
+
+    try:
+        await app.send_message(
+            uid,
+            f"💳 Credits Added\n➕ {amount} credits added by admin"
+        )
+    except:
+        pass
+
+    await m.reply(f"✅ Added {amount} credits to {uid}")
+
 @app.on_message(filters.command("cancelorder") & filters.user(ADMIN_IDS))
 async def cancelorder(_, m):
     try:
@@ -417,42 +456,6 @@ async def cancelorder(_, m):
         )
 
     await m.reply(f"✅ Order cancelled\n💳 Refunded: {refund}")
-
-@app.on_message(filters.command("addcredit") & filters.user(ADMIN_IDS))
-async def addcredit(_, m):
-    try:
-        _, uid, amount = m.text.split()
-        uid = int(uid)
-        amount = int(amount)
-    except:
-        return await m.reply(
-            "❌ Usage:\n/addcredit <user_id> <credits>\n\nExample:\n/addcredit 123456789 50"
-        )
-
-    if amount <= 0:
-        return await m.reply("❌ Credit amount must be greater than 0")
-
-    user = await users.find_one({"user_id": uid})
-    if not user:
-        return await m.reply("❌ User not found")
-
-    await users.update_one(
-        {"user_id": uid},
-        {"$inc": {"credits": amount}}
-    )
-
-    # Notify user
-    try:
-        await app.send_message(
-            uid,
-            f"💳 Credits Added\n\n"
-            f"➕ {amount} credits added to your account\n"
-            f"👑 Added by admin"
-        )
-    except:
-        pass
-
-    await m.reply(f"✅ Successfully added {amount} credits to user {uid}")
 
 @app.on_callback_query(filters.regex("^admin_orders_active$") & filters.user(ADMIN_IDS))
 async def admin_orders_active(_, cb):
