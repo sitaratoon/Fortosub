@@ -15,8 +15,8 @@ load_dotenv()
 # ================= CONFIG =================
 API_ID = 18946488
 API_HASH = "c163d4e28e63196c3806cf3b9b2885de"
-BOT_TOKEN = "8410298290:AAFfSXZjuACVgYLDpL95uF5WHonxb0gRzdU"
-MONGO_DB = ""
+BOT_TOKEN = "8410298290:AAG-VsrEg20fxEjwFyPINv36NVaA7PP_11U"
+MONGO_DB = "mongodb+srv://stoons:stoons@ajay.v5uug.mongodb.net/?retryWrites=true&w=majority"
 
 ADMIN_IDS = [6692613520]
 
