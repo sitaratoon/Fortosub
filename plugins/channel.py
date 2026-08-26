@@ -13,8 +13,8 @@ def back_menu():
 def channel_type_menu():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🌐 Public Link", callback_data="type_public"),
-            InlineKeyboardButton("📩 Private Request Link", callback_data="type_request")
+            InlineKeyboardButton("🌐 Public Link (@username)", callback_data="type_public"),
+            InlineKeyboardButton("📩 Private (Auto Request Link)", callback_data="type_request")
         ],
         [InlineKeyboardButton("⬅️ Back Menu", callback_data="menu")]
     ])
@@ -42,7 +42,7 @@ async def set_type(_, cb):
     if ch_type == "public":
         msg = "Send Public `@username` OR Channel ID (`-100xxxx`)\n\n⚠️ Bot channel mein ADMIN hona chahiye!"
     else:
-        msg = "Send **Private Request Link** (e.g. `https://t.me/+...`)\n\n⚠️ Bot channel mein **Approve Join Requests** permission ke sath ADMIN hona chahiye!"
+        msg = "Send Channel ID (e.g. `-1004334967403`)\n\n⚠️ Bot channel mein **Invite Users via Link** & **Approve Join Requests** permission ke sath ADMIN hona chahiye!\n\n*(Bot khud request link generate kar lega)*"
 
     await cb.message.edit_text(msg, reply_markup=back_menu())
 
@@ -59,19 +59,28 @@ async def steps(app, m):
                 if text.startswith("@"):
                     chat = await app.get_chat(text)
                     link = f"https://t.me/{text.lstrip('@')}"
-                elif "t.me/" in text and "+" not in text and "joinchat" not in text:
+                elif "t.me/" in text and "+" not in text:
                     chat = await app.get_chat(text)
                     link = text
                 else:
-                    chat = await app.get_chat(int(text))
+                    chat_id = int(text)
+                    chat = await app.get_chat(chat_id)
                     link = await app.export_chat_invite_link(chat.id)
             else:
-                # 📩 Private Request Link Handling
-                if "t.me/" in text or "+" in text or "joinchat" in text:
-                    link = text
-                    chat = await app.get_chat(text)
-                else:
-                    return await m.reply("❌ Invalid Link! Kripya valid Private Request Link send karein.")
+                # 📩 Private Request Link Auto Generation
+                try:
+                    chat_id = int(text)
+                except ValueError:
+                    return await m.reply("❌ Private Request Channel ke liye sirf Channel ID (`-100...`) bhejien!")
+
+                chat = await app.get_chat(chat_id)
+                
+                # Bot creates Join Request link automatically
+                invite_link_obj = await app.create_chat_invite_link(
+                    chat_id=chat.id,
+                    creates_join_request=True
+                )
+                link = invite_link_obj.invite_link
 
             # Check Bot Admin Rights
             bot_member = await app.get_chat_member(chat.id, "me")
@@ -79,7 +88,13 @@ async def steps(app, m):
                 return await m.reply("❌ Bot channel mein ADMIN nahi hai!")
 
         except Exception as e:
-            return await m.reply("❌ Channel Add Failed!\n\n1. Bot ko channel mein ADMIN banayein.\n2. Sahi link ya Username bhejien.")
+            return await m.reply(
+                "❌ Channel Add Failed!\n\n"
+                "Check karein:\n"
+                "1. Bot Channel mein Admin ho.\n"
+                "2. Bot ke paas 'Invite Users via Link' permission ho.\n"
+                "3. Channel ID Sahi ho (e.g. `-100...`)."
+            )
 
         await users.update_one(
             {"user_id": m.from_user.id},
@@ -93,7 +108,7 @@ async def steps(app, m):
                 }
             }}
         )
-        return await m.reply("Enter credits to use (min 50)")
+        return await m.reply(f"✅ Channel Verified: **{chat.title}**\n\nEnter credits to use (min 50)")
 
     if u.get("step") == "credits":
         if not text.isdigit():
@@ -131,4 +146,4 @@ async def steps(app, m):
             {"$inc": {"credits": -credits}, "$unset": {"step": "", "temp": "", "temp_type": ""}}
         )
 
-        await m.reply("✅ Order placed successfully!", reply_markup=back_menu())
+        await m.reply(f"✅ Order placed successfully!\n\nGenerated Link: {ch['link']}", reply_markup=back_menu())
