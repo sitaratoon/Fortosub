@@ -10,17 +10,41 @@ def back_menu():
         [InlineKeyboardButton("⬅️ Back Menu", callback_data="menu")]
     ])
 
+def channel_type_menu():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🌐 Public Link", callback_data="type_public"),
+            InlineKeyboardButton("📩 Private Request Link", callback_data="type_request")
+        ],
+        [InlineKeyboardButton("⬅️ Back Menu", callback_data="menu")]
+    ])
+
 @Client.on_callback_query(filters.regex("^add$"))
 async def add(_, cb):
     u = await get_user(cb.from_user.id)
     if u["credits"] < MIN_ORDER_CREDITS:
         return await cb.answer("Minimum 50 credits required", show_alert=True)
 
-    await users.update_one({"user_id": cb.from_user.id}, {"$set": {"step": "channel"}})
     await cb.message.edit_text(
-        "Send channel @username OR private channel ID\nBot must be ADMIN",
-        reply_markup=back_menu()
+        "📢 **Select Channel Type**\n\nAap kis tarah ka channel add karna chahte hain?",
+        reply_markup=channel_type_menu()
     )
+
+@Client.on_callback_query(filters.regex("^type_"))
+async def set_type(_, cb):
+    ch_type = cb.data.split("_")[1]  # 'public' or 'request'
+    
+    await users.update_one(
+        {"user_id": cb.from_user.id},
+        {"$set": {"step": "channel", "temp_type": ch_type}}
+    )
+    
+    if ch_type == "public":
+        msg = "Send Public `@username` OR Channel ID (`-100xxxx`)\n\n⚠️ Bot channel mein ADMIN hona chahiye!"
+    else:
+        msg = "Send **Private Request Link** (e.g. `https://t.me/+...`)\n\n⚠️ Bot channel mein **Approve Join Requests** permission ke sath ADMIN hona chahiye!"
+
+    await cb.message.edit_text(msg, reply_markup=back_menu())
 
 @Client.on_message(filters.private & filters.text & ~filters.regex("^/"))
 async def steps(app, m):
@@ -28,25 +52,34 @@ async def steps(app, m):
     text = m.text.strip()
 
     if u.get("step") == "channel":
+        ch_type = u.get("temp_type", "public")
+        
         try:
-            if text.startswith("@"):
-                chat = await app.get_chat(text)
-                link = f"https://t.me/{text.lstrip('@')}"
-
-            elif "t.me/" in text:
-                chat = await app.get_chat(text)
-                link = text
-
+            if ch_type == "public":
+                if text.startswith("@"):
+                    chat = await app.get_chat(text)
+                    link = f"https://t.me/{text.lstrip('@')}"
+                elif "t.me/" in text and "+" not in text and "joinchat" not in text:
+                    chat = await app.get_chat(text)
+                    link = text
+                else:
+                    chat = await app.get_chat(int(text))
+                    link = await app.export_chat_invite_link(chat.id)
             else:
-                chat = await app.get_chat(int(text))
-                link = await app.export_chat_invite_link(chat.id)
+                # 📩 Private Request Link Handling
+                if "t.me/" in text or "+" in text or "joinchat" in text:
+                    link = text
+                    chat = await app.get_chat(text)
+                else:
+                    return await m.reply("❌ Invalid Link! Kripya valid Private Request Link send karein.")
 
+            # Check Bot Admin Rights
             bot_member = await app.get_chat_member(chat.id, "me")
             if not bot_member.privileges:
-                raise Exception
+                return await m.reply("❌ Bot channel mein ADMIN nahi hai!")
 
-        except:
-            return await m.reply("❌ Channel add failed\nBot must be ADMIN")
+        except Exception as e:
+            return await m.reply("❌ Channel Add Failed!\n\n1. Bot ko channel mein ADMIN banayein.\n2. Sahi link ya Username bhejien.")
 
         await users.update_one(
             {"user_id": m.from_user.id},
@@ -55,7 +88,8 @@ async def steps(app, m):
                 "temp": {
                     "title": chat.title,
                     "link": link,
-                    "channel_id": chat.id
+                    "channel_id": chat.id,
+                    "type": ch_type
                 }
             }}
         )
@@ -77,6 +111,7 @@ async def steps(app, m):
             "title": ch["title"],
             "link": ch["link"],
             "channel_id": ch["channel_id"],
+            "type": ch.get("type", "public"),
             "status": "active"
         })
 
@@ -93,7 +128,7 @@ async def steps(app, m):
 
         await users.update_one(
             {"user_id": m.from_user.id},
-            {"$inc": {"credits": -credits}, "$unset": {"step": "", "temp": ""}}
+            {"$inc": {"credits": -credits}, "$unset": {"step": "", "temp": "", "temp_type": ""}}
         )
 
-        await m.reply("✅ Order placed", reply_markup=back_menu())
+        await m.reply("✅ Order placed successfully!", reply_markup=back_menu())
