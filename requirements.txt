@@ -1,6 +1,6 @@
-pyrogram==2.0.83
+pyrogram
 tgcrypto
 motor
-pymongo
 dnspython
 python-dotenv
+aiohttp
