@@ -7,14 +7,6 @@ from pyrogram.errors import UserNotParticipant
 from database import users, channels, orders, get_user
 from config import DAILY_JOIN_LIMIT, VERIFY_DELAY, JOIN_REWARD
 
-# 📩 AUTO-APPROVE PRIVATE JOIN REQUESTS
-@Client.on_chat_join_request()
-async def auto_approve_request(app, req):
-    try:
-        await app.approve_chat_join_request(req.chat.id, req.from_user.id)
-    except Exception:
-        pass
-
 @Client.on_callback_query(filters.regex("^earn$"))
 async def earn(app, cb):
     u = await get_user(cb.from_user.id)
@@ -65,7 +57,7 @@ async def earn(app, cb):
     
     ch = await channels.find_one({
         "status": "active",
-        "owner_id": {"$ne": cb.from_user.id},  # Apne khud ke channel se earn nahi kar sakte
+        "owner_id": {"$ne": cb.from_user.id},
         "_id": {"$nin": joined_object_ids}
     })
 
@@ -113,7 +105,7 @@ async def earn(app, cb):
     ])
 
     await cb.message.edit_text(
-        f"Join channel & wait {VERIFY_DELAY}s then verify\n\n📢 {ch['title']}",
+        f"Join/Request channel & wait {VERIFY_DELAY}s then verify\n\n📢 {ch['title']}",
         reply_markup=kb
     )
 
@@ -132,17 +124,39 @@ async def check_join(app, cb):
     if not ch:
         return await cb.answer("Channel expire ho chuka hai", show_alert=True)
 
-    # Verification check
+    # 🔍 Verification Logic: Member Ho YA Request Bheji Ho
+    is_valid_user = False
+    
     try:
-        await app.get_chat_member(ch["channel_id"], cb.from_user.id)
+        # Check 1: Normal Joined Member Check
+        member_info = await app.get_chat_member(ch["channel_id"], cb.from_user.id)
+        if member_info.status not in ["kicked", "left"]:
+            is_valid_user = True
     except UserNotParticipant:
+        pass
+    except Exception:
+        pass
+
+    # Check 2: Pending Request Verification
+    if not is_valid_user:
+        try:
+            # Check if user has a pending request in channel
+            # Note: Approving request directly confirms user clicked the request link
+            await app.approve_chat_join_request(ch["channel_id"], cb.from_user.id)
+            is_valid_user = True
+        except Exception:
+            is_valid_user = False
+
+    if not is_valid_user:
         btn_text = "📩 Request Join" if ch.get("type") == "request" else "🔔 Join Channel"
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(btn_text, url=ch["link"])],
             [InlineKeyboardButton("✅ Verify Join", callback_data=f"check_{oid}")]
         ])
         return await cb.message.edit_text(
-            "❌ Aap channel mein join nahi ho ya Request accept nahi hui.\n\nPehle join karo fir verify karo 👇",
+            "❌ **Verification Failed!**\n\n"
+            "Aapne abhi tak channel join nahi kiya hai ya Join Request nahi bheji hai.\n"
+            "Pehle button par click karke request bhejein, fir verify karein 👇",
             reply_markup=kb
         )
 
