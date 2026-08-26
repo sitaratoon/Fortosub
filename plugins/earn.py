@@ -1,25 +1,70 @@
 import time
 from bson import ObjectId
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import UserNotParticipant
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ChatJoinRequest, ChatMemberUpdated
+from pyrogram.enums import ChatMemberStatus
+from pyrogram.errors import UserNotParticipant, ChatAdminRequired, PeerIdInvalid
 
-from database import users, channels, orders, get_user
+from database import users, channels, orders, get_user, db
 from config import DAILY_JOIN_LIMIT, VERIFY_DELAY, JOIN_REWARD
 
-# 📩 LISTEN TO JOIN REQUESTS (Store request without approving it)
-@Client.on_chat_join_request()
-async def capture_join_request(app, req):
-    try:
-        ch = await channels.find_one({"channel_id": req.chat.id, "status": "active"})
-        if ch:
-            await users.update_one(
-                {"user_id": req.from_user.id},
-                {"$addToSet": {"pending_requests": str(ch["_id"])}}
-            )
-    except Exception:
-        pass
+# Live user status track karne ke liye collection
+fs_status_col = db["fsub_user_status"]
 
+# 📩 1. CAPTURE JOIN REQUEST (Pending Request Track karega)
+@Client.on_chat_join_request()
+async def handle_join_request(client: Client, join_request: ChatJoinRequest):
+    user_id = join_request.from_user.id
+    channel_id = join_request.chat.id
+    
+    ch = await channels.find_one({"channel_id": channel_id, "status": "active"})
+    if not ch:
+        return
+        
+    try:
+        await fs_status_col.update_one(
+            {"user_id": user_id, "channel_id": channel_id},
+            {"$set": {"status": "request_submitted", "ch_id": str(ch["_id"])}},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"Join request error: {e}")
+
+# 🔄 2. CAPTURE MEMBER UPDATE (Join / Leave Track karega)
+@Client.on_chat_member_updated()
+async def handle_member_update(client: Client, chat_member_updated: ChatMemberUpdated):
+    if not chat_member_updated.from_user:
+        return
+
+    user_id = chat_member_updated.from_user.id
+    channel_id = chat_member_updated.chat.id
+    
+    ch = await channels.find_one({"channel_id": channel_id, "status": "active"})
+    if not ch:
+        return
+    
+    old_status = chat_member_updated.old_chat_member.status if chat_member_updated.old_chat_member else None
+    new_status = chat_member_updated.new_chat_member.status if chat_member_updated.new_chat_member else None
+    
+    active_statuses = {ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER}
+    
+    try:
+        if new_status in active_statuses and (old_status is None or old_status not in active_statuses):
+            await fs_status_col.update_one(
+                {"user_id": user_id, "channel_id": channel_id},
+                {"$set": {"status": "joined", "ch_id": str(ch["_id"])}},
+                upsert=True
+            )
+        elif old_status in active_statuses and (new_status is None or new_status not in active_statuses):
+            await fs_status_col.update_one(
+                {"user_id": user_id, "channel_id": channel_id},
+                {"$set": {"status": "left", "ch_id": str(ch["_id"])}},
+                upsert=True
+            )
+    except Exception as e:
+        print(f"Member update error: {e}")
+
+# 💰 3. EARN HANDLER
 @Client.on_callback_query(filters.regex("^earn$"))
 async def earn(app, cb):
     u = await get_user(cb.from_user.id)
@@ -32,13 +77,16 @@ async def earn(app, cb):
         if not ObjectId.is_valid(jid):
             continue
         
-        ch_old = await channels.find_one({
-            "_id": ObjectId(jid),
-            "status": "active"
-        })
+        ch_old = await channels.find_one({"_id": ObjectId(jid), "status": "active"})
         if not ch_old:
             continue
 
+        # Check DB status first for pending requests
+        status_rec = await fs_status_col.find_one({"user_id": cb.from_user.id, "channel_id": ch_old["channel_id"]})
+        if status_rec and status_rec.get("status") in ["request_submitted", "joined"]:
+            continue
+
+        # Fallback Pyrogram Check
         try:
             await app.get_chat_member(ch_old["channel_id"], cb.from_user.id)
         except UserNotParticipant:
@@ -59,10 +107,6 @@ async def earn(app, cb):
                 reply_markup=kb
             )
         except Exception:
-            await channels.update_one(
-                {"_id": ObjectId(jid)},
-                {"$set": {"status": "inactive"}}
-            )
             continue
 
     # 🔁 STEP 2: FETCH NEW ACTIVE CHANNEL
@@ -76,31 +120,6 @@ async def earn(app, cb):
 
     if not ch:
         return await cb.answer("Filhal koi naya channel available nahi hai!", show_alert=True)
-
-    # Check Bot Admin Rights
-    try:
-        bot_member = await app.get_chat_member(ch["channel_id"], "me")
-        if not bot_member.privileges:
-            raise Exception
-    except Exception:
-        await channels.update_one(
-            {"_id": ch["_id"]},
-            {"$set": {"status": "inactive"}}
-        )
-        order = await orders.find_one({"channel_id": str(ch["_id"]), "status": "active"})
-        if order:
-            completed = order.get("completed", 0)
-            refund = max(order["credits_used"] - (completed * 2), 0)
-            await orders.update_one(
-                {"_id": order["_id"]},
-                {"$set": {"status": "cancelled"}}
-            )
-            if refund > 0:
-                await users.update_one(
-                    {"user_id": order["user_id"]},
-                    {"$inc": {"credits": refund}}
-                )
-        return await earn(app, cb)
 
     await users.update_one(
         {"user_id": cb.from_user.id},
@@ -118,10 +137,11 @@ async def earn(app, cb):
     ])
 
     await cb.message.edit_text(
-        f"Join/Request channel & wait {VERIFY_DELAY}s then verify\n\n📢 {ch['title']}",
+        f"Join/Request channel & wait {VERIFY_DELAY}s then verify\n\n📢 **{ch['title']}**",
         reply_markup=kb
     )
 
+# ✅ 4. VERIFY HANDLER
 @Client.on_callback_query(filters.regex("^check_"))
 async def check_join(app, cb):
     oid = cb.data.split("_")[1]
@@ -137,23 +157,23 @@ async def check_join(app, cb):
     if not ch:
         return await cb.answer("Channel expire ho chuka hai", show_alert=True)
 
-    is_valid_user = False
-    
-    # Check 1: Normal Public Channel Member Check
-    try:
-        member_info = await app.get_chat_member(ch["channel_id"], cb.from_user.id)
-        if member_info.status not in ["kicked", "left"]:
-            is_valid_user = True
-    except Exception:
-        pass
+    is_verified = False
 
-    # Check 2: Pending Request Event Check (Request Approve kiye bina verify)
-    if not is_valid_user:
-        pending_list = u.get("pending_requests", [])
-        if oid in pending_list:
-            is_valid_user = True
+    # Check 1: Live Status in MongoDB (Request or Joined)
+    status_rec = await fs_status_col.find_one({"user_id": cb.from_user.id, "channel_id": ch["channel_id"]})
+    if status_rec and status_rec.get("status") in ["request_submitted", "joined"]:
+        is_verified = True
 
-    if not is_valid_user:
+    # Check 2: Pyrogram API Fallback
+    if not is_verified:
+        try:
+            member_info = await app.get_chat_member(ch["channel_id"], cb.from_user.id)
+            if member_info.status not in [ChatMemberStatus.BANNED, ChatMemberStatus.LEFT]:
+                is_verified = True
+        except Exception:
+            pass
+
+    if not is_verified:
         btn_text = "📩 Request Join" if ch.get("type") == "request" else "🔔 Join Channel"
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(btn_text, url=ch["link"])],
@@ -161,22 +181,21 @@ async def check_join(app, cb):
         ])
         return await cb.message.edit_text(
             "❌ **Verification Failed!**\n\n"
-            "Aapne abhi tak channel join nahi kiya hai ya Join Request nahi bheji hai.\n"
-            "Pehle button par click karke request bhejein, fir verify karein 👇",
+            "Aapne abhi tak Channel Join Request nahi bheji hai.\n"
+            "Pehle link par click karke request bhejein, fir verify karein 👇",
             reply_markup=kb
         )
 
-    # Credit reward add karein aur pending state clear karein
+    # Add Credit & Save Joined
     await users.update_one(
         {"user_id": cb.from_user.id},
         {
             "$inc": {"credits": JOIN_REWARD, "daily": 1},
-            "$push": {"joined": str(oid)},
-            "$pull": {"pending_requests": str(oid)}
+            "$push": {"joined": str(oid)}
         }
     )
 
-    # Order Progress Update
+    # Order Complete Logic
     order = await orders.find_one({"channel_id": str(oid), "status": "active"})
     if order:
         done = order.get("completed", 0) + 1
