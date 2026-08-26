@@ -7,6 +7,19 @@ from pyrogram.errors import UserNotParticipant
 from database import users, channels, orders, get_user
 from config import DAILY_JOIN_LIMIT, VERIFY_DELAY, JOIN_REWARD
 
+# 📩 LISTEN TO JOIN REQUESTS (Store request without approving it)
+@Client.on_chat_join_request()
+async def capture_join_request(app, req):
+    try:
+        ch = await channels.find_one({"channel_id": req.chat.id, "status": "active"})
+        if ch:
+            await users.update_one(
+                {"user_id": req.from_user.id},
+                {"$addToSet": {"pending_requests": str(ch["_id"])}}
+            )
+    except Exception:
+        pass
+
 @Client.on_callback_query(filters.regex("^earn$"))
 async def earn(app, cb):
     u = await get_user(cb.from_user.id)
@@ -124,28 +137,21 @@ async def check_join(app, cb):
     if not ch:
         return await cb.answer("Channel expire ho chuka hai", show_alert=True)
 
-    # 🔍 Verification Logic: Member Ho YA Request Bheji Ho
     is_valid_user = False
     
+    # Check 1: Normal Public Channel Member Check
     try:
-        # Check 1: Normal Joined Member Check
         member_info = await app.get_chat_member(ch["channel_id"], cb.from_user.id)
         if member_info.status not in ["kicked", "left"]:
             is_valid_user = True
-    except UserNotParticipant:
-        pass
     except Exception:
         pass
 
-    # Check 2: Pending Request Verification
+    # Check 2: Pending Request Event Check (Request Approve kiye bina verify)
     if not is_valid_user:
-        try:
-            # Check if user has a pending request in channel
-            # Note: Approving request directly confirms user clicked the request link
-            await app.approve_chat_join_request(ch["channel_id"], cb.from_user.id)
+        pending_list = u.get("pending_requests", [])
+        if oid in pending_list:
             is_valid_user = True
-        except Exception:
-            is_valid_user = False
 
     if not is_valid_user:
         btn_text = "📩 Request Join" if ch.get("type") == "request" else "🔔 Join Channel"
@@ -160,16 +166,17 @@ async def check_join(app, cb):
             reply_markup=kb
         )
 
-    # Add Credit & Track Joined Channel ID
+    # Credit reward add karein aur pending state clear karein
     await users.update_one(
         {"user_id": cb.from_user.id},
         {
             "$inc": {"credits": JOIN_REWARD, "daily": 1},
-            "$push": {"joined": str(oid)}
+            "$push": {"joined": str(oid)},
+            "$pull": {"pending_requests": str(oid)}
         }
     )
 
-    # Order Complete logic
+    # Order Progress Update
     order = await orders.find_one({"channel_id": str(oid), "status": "active"})
     if order:
         done = order.get("completed", 0) + 1
